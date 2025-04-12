@@ -1,44 +1,73 @@
-#define PH_PIN 34           // pH sensor
-#define TEMP_PIN 32         // DS18B20 temperature sensor
-#define SOIL_MOIST 33       // Soil moisture sensor
-
+#include <WiFi.h>
+#include <WebServer.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+// Wi-Fi credentials
+const char* ssid = "Boardroom";
+const char* password = "board@2023";
+
+// Pin definitions
+#define PH_PIN 34
+#define TEMP_PIN 32
+#define SOIL_MOIST 33
+
+// Sensor objects
 OneWire oneWire(TEMP_PIN);
 DallasTemperature sensors(&oneWire);
 
-float slope = -0.18; // Adjust this from your pH calibration
+// Web server runs on port 80
+WebServer server(80);
 
-void setup() {
-  Serial.begin(115200);
-  sensors.begin();  // Initialize temperature sensor
-}
+// pH calibration slope
+float slope = -0.18;
 
-void loop() {
-  // --- pH Sensor Reading ---
+// Function to handle HTTP GET request
+void handleSensorData() {
+  // Read pH
   int rawPH = analogRead(PH_PIN);
   float voltagePH = rawPH * (3.3 / 4095.0);
   float pH = 7 + ((voltagePH - 2.5) / slope);
 
-  // --- Temperature Reading ---
+  // Read Temperature
   sensors.requestTemperatures();
   float temperatureC = sensors.getTempCByIndex(0);
 
-  // --- Soil Moisture Reading ---
+  // Read Soil Moisture
   int soilRaw = analogRead(SOIL_MOIST);
-  float soilPercent = map(soilRaw, 4095, 0, 0, 100); // dry = high voltage
+  float soilPercent = map(soilRaw, 4095, 0, 0, 100);
 
-  // --- Display All Readings ---
+  // Send JSON response
+  String json = "{";
+  json += "\"temperature\":" + String(temperatureC, 2) + ",";
+  json += "\"ph\":" + String(pH, 2) + ",";
+  json += "\"soil_moisture\":" + String(soilPercent, 2);
+  json += "}";
+  
+  server.send(200, "application/json", json);
+}
 
-  Serial.print("pH: ");
-  Serial.print(pH, 2);
-  Serial.print(" | Temp: ");
-  Serial.print(temperatureC);
-  Serial.print(" °C | Soil Moisture: ");
-  Serial.print(soilPercent);
-  Serial.println(" %");
+void setup() {
+  Serial.begin(115200);
+  sensors.begin();
 
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
 
-  delay(1000);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected! IP address: ");
+  Serial.println(WiFi.localIP());
+
+  // Set up route
+  server.on("/", handleSensorData);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
 }
