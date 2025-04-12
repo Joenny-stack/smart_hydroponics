@@ -4,8 +4,8 @@
 #include <DallasTemperature.h>
 
 // Wi-Fi credentials
-const char* ssid = "Boardroom";
-const char* password = "board@2023";
+const char* ssid = "Johnson";
+const char* password = "tarirowangu";
 
 // Pin definitions
 #define PH_PIN 34
@@ -64,7 +64,7 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   // Set up route
-  server.on("/", handleSensorData);
+  server.on("/status", handleSensorData);
   server.begin();
 }
 
