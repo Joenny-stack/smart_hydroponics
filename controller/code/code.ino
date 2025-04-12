@@ -22,28 +22,24 @@ WebServer server(80);
 // pH calibration slope
 float slope = -0.18;
 
-// Function to handle HTTP GET request
+// Handle HTTP GET
 void handleSensorData() {
-  // Read pH
   int rawPH = analogRead(PH_PIN);
   float voltagePH = rawPH * (3.3 / 4095.0);
   float pH = 7 + ((voltagePH - 2.5) / slope);
 
-  // Read Temperature
   sensors.requestTemperatures();
   float temperatureC = sensors.getTempCByIndex(0);
 
-  // Read Soil Moisture
   int soilRaw = analogRead(SOIL_MOIST);
   float soilPercent = map(soilRaw, 4095, 0, 0, 100);
 
-  // Send JSON response
   String json = "{";
   json += "\"temperature\":" + String(temperatureC, 2) + ",";
   json += "\"ph\":" + String(pH, 2) + ",";
   json += "\"soil_moisture\":" + String(soilPercent, 2);
   json += "}";
-  
+
   server.send(200, "application/json", json);
 }
 
@@ -51,23 +47,31 @@ void setup() {
   Serial.begin(115200);
   sensors.begin();
 
-  // Connect to Wi-Fi
+  WiFi.mode(WIFI_STA); // Ensure it's in station mode
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+  Serial.println("Connecting to WiFi...");
+  int retries = 0;
+  while (WiFi.status() != WL_CONNECTED && retries < 20) {
+    delay(1000);
     Serial.print(".");
+    retries++;
   }
 
-  Serial.println("\nConnected! IP address: ");
-  Serial.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected!");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
 
-  // Set up route
-  server.on("/", handleSensorData);
-  server.begin();
+    server.on("/", handleSensorData);
+    server.begin();
+  } else {
+    Serial.println("\nFailed to connect to WiFi.");
+  }
 }
 
 void loop() {
-  server.handleClient();
+  if (WiFi.status() == WL_CONNECTED) {
+    server.handleClient();
+  }
 }
