@@ -47,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   StatusTile(
                     label: "pH Level",
-                    value: "${data.ph.toStringAsFixed(2)}",
+                    value: data.ph.toStringAsFixed(2),
                     icon: Icons.science,
                     color: Colors.orange,
                   ),

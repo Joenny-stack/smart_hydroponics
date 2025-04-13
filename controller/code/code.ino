@@ -1,12 +1,12 @@
 #include <WiFiManager.h>               // Wi-Fi Manager
 #include <WebServer.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
+#include <OneWire.h>  //for temp sensor
+#include <DallasTemperature.h> //for temp sensor
 
 // Pin definitions
 #define PH_PIN 34
 #define TEMP_PIN 32
-#define SOIL_MOIST 33
+#define LEVEL 33
 
 // Sensor objects
 OneWire oneWire(TEMP_PIN);
@@ -26,13 +26,13 @@ void handleSensorData() {
   sensors.requestTemperatures();
   float temperatureC = sensors.getTempCByIndex(0);
 
-  int soilRaw = analogRead(SOIL_MOIST);
-  float soilPercent = map(soilRaw, 4095, 0, 0, 100);
+  int levelRaw = analogRead(LEVEL);
+  float levelPercent = map(levelRaw, 4095, 0, 0, 100);
 
   String json = "{";
   json += "\"temperature\":" + String(temperatureC, 2) + ",";
   json += "\"ph\":" + String(pH, 2) + ",";
-  json += "\"soil_moisture\":" + String(soilPercent, 2);
+  json += "\"water_level\":" + String(levelPercent, 2);
   json += "}";
 
   server.send(200, "application/json", json);

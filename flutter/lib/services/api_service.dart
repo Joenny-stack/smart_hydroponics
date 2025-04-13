@@ -7,7 +7,7 @@ class ApiService {
   static Stream<DeviceStatus> fetchStatusStream(String espIp) async* {
     while (true) {
       try {
-        final response = await http.get(Uri.parse('http://' + espIp + '/'));
+        final response = await http.get(Uri.parse('http://$espIp/'));
 
         if (response.statusCode == 200) {
           yield DeviceStatus.fromJson(json.decode(response.body));
