@@ -1,5 +1,3 @@
-import '../services/notification_service.dart';
-
 class DeviceStatus {
   final double temperature;
   final double ph;
@@ -28,29 +26,19 @@ class DeviceStatus {
   List<String> checkAlerts() {
     List<String> alerts = [];
     if (temperature < 15 || temperature > 30) {
-      String alert = "Temperature is out of range (15-30 °C).";
-      alerts.add(alert);
-      NotificationService.showNotification("Alert", alert);
+      alerts.add("Temperature is out of range (15-30 °C).");
     }
     if (ph < 5.5 || ph > 7.5) {
-      String alert = "pH level is out of range (5.5-7.5).";
-      alerts.add(alert);
-      NotificationService.showNotification("Alert", alert);
+      alerts.add("pH level is out of range (5.5-7.5).");
     }
     if (soilMoisture < 20 || soilMoisture > 80) {
-      String alert = "Soil moisture is out of range (20-80%).";
-      alerts.add(alert);
-      NotificationService.showNotification("Alert", alert);
+      alerts.add("Soil moisture is out of range (20-80%).");
     }
     if (waterLevel < 50) {
-      String alert = "Water level is too low (<50%).";
-      alerts.add(alert);
-      NotificationService.showNotification("Alert", alert);
+      alerts.add("Water level is too low (<50%).");
     }
     if (tds < 500 || tds > 1500) {
-      String alert = "TDS is out of range (500-1500 ppm).";
-      alerts.add(alert);
-      NotificationService.showNotification("Alert", alert);
+      alerts.add("TDS is out of range (500-1500 ppm).");
     }
     return alerts;
   }

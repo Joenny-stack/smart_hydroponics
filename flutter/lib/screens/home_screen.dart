@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../models/device_status.dart';
 import '../services/api_service.dart';
 import '../widgets/status_tile.dart';
+import 'settings_screen.dart';
+import 'readings_screen.dart';
+import '../services/readings_db.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,14 +15,22 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   Stream<DeviceStatus> _statusStream = Stream.empty(); // 👈 Initialize with an empty stream
-  String espIp = ''; // 👈 Initialize as empty string
+  String espIp = '192.168.0.1'; // 👈 Initialize as empty string
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showIpDialog();
-    });
+    _loadLastUsedIp(); // Only load the last used IP, do not show dialog on start
+  }
+
+    void _loadLastUsedIp() async {
+    final lastIp = await ReadingsDB().getLastUsedIp();
+    if (lastIp != null && lastIp.isNotEmpty) {
+      setState(() {
+        espIp = lastIp;
+        _statusStream = ApiService.fetchStatusStream(espIp);
+      });
+    }
   }
 
   void _showIpDialog() async {
@@ -55,13 +66,54 @@ class _HomeScreenState extends State<HomeScreen> {
         espIp = enteredIp;
         _statusStream = ApiService.fetchStatusStream(espIp); // 👈 Update the stream
       });
+      await ReadingsDB().saveLastUsedIp(espIp);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Smart Hydroponics")),
+      appBar: AppBar(
+        title: const Text("Smart Hydroponics"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Readings History',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ReadingsScreen()),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () async {
+              final newIp = await Navigator.push<String>(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => SettingsScreen(
+                    currentIp: espIp,
+                    onIpChanged: (ip) {
+                      setState(() {
+                        espIp = ip;
+                        _statusStream = ApiService.fetchStatusStream(espIp);
+                      });
+                      Navigator.pop(context, ip);
+                    },
+                  ),
+                ),
+              );
+              if (newIp != null && newIp.isNotEmpty && newIp != espIp) {
+                setState(() {
+                  espIp = newIp;
+                  _statusStream = ApiService.fetchStatusStream(espIp);
+                });
+              }
+            },
+          ),
+        ],
+      ),
       body: StreamBuilder<DeviceStatus>(
         stream: _statusStream,
         builder: (context, snapshot) {
@@ -69,6 +121,8 @@ class _HomeScreenState extends State<HomeScreen> {
             return const Center(child: CircularProgressIndicator());
           } else if (snapshot.hasData) {
             final data = snapshot.data!;
+            // Save reading to DB
+            ReadingsDB.insertReading(data);
             return SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
