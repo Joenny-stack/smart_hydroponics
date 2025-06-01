@@ -1,36 +1,39 @@
+#include <WiFiManager.h>
+#include <WebServer.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-#define TdsSensorPin 27
-#define ONE_WIRE_BUS 32       // DS18B20 on GPIO 32
-#define PH_PIN 34             // pH sensor connected to GPIO 34
-#define LEVEL 33              // Water level sensor connected to GPIO 33
-#define VREF 3.3              // analog reference voltage (Volt) of the ADC
-#define SCOUNT 30             // number of samples
+#define TdsSensorPin 35
+#define ONE_WIRE_BUS 32
+#define PH_PIN 34
+#define LEVEL 33
+#define PUMP_PIN 26
+#define VREF 3.3
+#define SCOUNT 30
 
 int analogBuffer[SCOUNT];
 int analogBufferTemp[SCOUNT];
 int analogBufferIndex = 0;
 int copyIndex = 0;
+bool tdsBufferReady = false;
 
 float averageVoltage = 0;
 float tdsValue = 0;
 float temperature = 25.0;
 float pHValue = 7.0;
 float levelPercent = 0.0;
-
-// pH calibration slope
-float slope = -0.18; // default value; calibrate as needed
+float slope = -0.18;
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
-// LCD Setup
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 unsigned long lastLcdToggle = 0;
 bool showSensorData = true;
+
+WebServer server(80);
 
 int getMedianNum(int bArray[], int iFilterLen) {
   int bTab[iFilterLen];
@@ -53,25 +56,68 @@ int getMedianNum(int bArray[], int iFilterLen) {
   return bTemp;
 }
 
+void handleStatus() {
+  String json = "{";
+  json += "\"temperature\":" + String(temperature, 2) + ",";
+  json += "\"ph\":" + String(pHValue, 2) + ",";
+  json += "\"water_level\":" + String(levelPercent, 2) + ",";
+  json += "\"tds\":" + String(tdsValue, 2) + ",";
+  json += "\"pump\":" + String(digitalRead(PUMP_PIN));
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
 void setup() {
   Serial.begin(115200);
+  delay(2000);
+
   pinMode(TdsSensorPin, INPUT);
   pinMode(PH_PIN, INPUT);
   pinMode(LEVEL, INPUT);
-  sensors.begin();
-  analogReadResolution(12); // For ESP32: 0-4095
-  analogSetAttenuation(ADC_11db); // Full range
+  pinMode(PUMP_PIN, OUTPUT);
+  digitalWrite(PUMP_PIN, LOW);
 
-  // LCD init
+  sensors.begin();
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
-  lcd.print("Initializing...");
-  delay(1000);
+  lcd.print("Connecting WiFi...");
+
+  WiFi.mode(WIFI_STA);
+  WiFiManager wm;
+  wm.setConfigPortalTimeout(180);
+  if (!wm.autoConnect("Greenhouse_Setup")) {
+    Serial.println("❌ WiFi failed. Restarting...");
+    ESP.restart();
+  }
+
+  Serial.print("✅ Connected! IP: ");
+  Serial.println(WiFi.localIP());
+
   lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("IP:");
+  lcd.setCursor(0, 1);
+  lcd.print(WiFi.localIP());
+
+  server.on("/status", handleStatus);
+  server.begin();
+
+  Serial.println("Filling TDS buffer...");
+  for (int i = 0; i < SCOUNT; i++) {
+    analogBuffer[i] = analogRead(TdsSensorPin);
+    delay(40);
+  }
+  tdsBufferReady = true;
+  Serial.println("TDS buffer ready.");
 }
 
 void loop() {
+  server.handleClient();
+
   static unsigned long analogSampleTimepoint = millis();
   if (millis() - analogSampleTimepoint > 40U) {
     analogSampleTimepoint = millis();
@@ -79,6 +125,7 @@ void loop() {
     analogBufferIndex++;
     if (analogBufferIndex == SCOUNT) {
       analogBufferIndex = 0;
+      tdsBufferReady = true;
     }
   }
 
@@ -86,57 +133,54 @@ void loop() {
   if (millis() - printTimepoint > 800U) {
     printTimepoint = millis();
 
-    // Get temperature
     sensors.requestTemperatures();
     temperature = sensors.getTempCByIndex(0);
 
-    // Get pH
     int rawPH = analogRead(PH_PIN);
     float voltagePH = rawPH * (VREF / 4095.0);
-    pHValue = 7 + ((voltagePH - 2.5) / slope); // Adjust slope if needed
+    pHValue = 7 + ((voltagePH - 2.1) / slope);
 
-    // Get Level % (inverted mapping)
     int levelRaw = analogRead(LEVEL);
     levelPercent = map(levelRaw, 4095, 0, 0, 100);
 
-    // Get TDS
-    for (copyIndex = 0; copyIndex < SCOUNT; copyIndex++) {
-      analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
+    if (tdsBufferReady) {
+      for (copyIndex = 0; copyIndex < SCOUNT; copyIndex++) {
+        analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
+      }
+
+      int rawMedian = getMedianNum(analogBufferTemp, SCOUNT);
+      averageVoltage = rawMedian * VREF / 4095.0;
+      float compensationCoefficient = 1.0 + 0.02 * (temperature - 25.0);
+      float compensationVoltage = averageVoltage / compensationCoefficient;
+
+      tdsValue = (133.42 * pow(compensationVoltage, 3)
+                - 255.86 * pow(compensationVoltage, 2)
+                + 857.39 * compensationVoltage) * 0.5;
+
+      Serial.printf("TDS: %.0f ppm | Raw ADC: %d | Voltage: %.3f V\n", tdsValue, rawMedian, averageVoltage);
     }
 
-    averageVoltage = getMedianNum(analogBufferTemp, SCOUNT) * (float)VREF / 4095.0;
-    float compensationCoefficient = 1.0 + 0.02 * (temperature - 25.0);
-    float compensationVoltage = averageVoltage / compensationCoefficient;
+    if (levelPercent < 70 ) {
+      digitalWrite(PUMP_PIN, HIGH);
+      Serial.println("Pump ON");
+    } else {
+      digitalWrite(PUMP_PIN, LOW);
+      Serial.println("Pump OFF");
+    }
 
-    tdsValue = (133.42 * compensationVoltage * compensationVoltage * compensationVoltage
-               - 255.86 * compensationVoltage * compensationVoltage
-               + 857.39 * compensationVoltage) * 0.5;
-
-    // Print all sensor data to Serial
-    Serial.print("Temp: ");
-    Serial.print(temperature);
-    Serial.print("°C | pH: ");
-    Serial.print(pHValue, 2);
-    Serial.print(" | Level: ");
-    Serial.print(levelPercent, 0);
-    Serial.print("% | TDS: ");
-    Serial.print(tdsValue, 0);
-    Serial.println(" ppm");
+    Serial.printf("Temp: %.2f°C | pH: %.2f | Level: %.0f%%\n", temperature, pHValue, levelPercent);
   }
 
-  // LCD toggle every 5 seconds
   if (millis() - lastLcdToggle > 5000) {
     lastLcdToggle = millis();
     showSensorData = !showSensorData;
     lcd.clear();
-
     if (showSensorData) {
       lcd.setCursor(0, 0);
       lcd.print("T:");
       lcd.print(temperature, 0);
       lcd.print("C pH:");
       lcd.print(pHValue, 1);
-
       lcd.setCursor(0, 1);
       lcd.print("L:");
       lcd.print(levelPercent, 0);
@@ -144,9 +188,9 @@ void loop() {
       lcd.print(tdsValue, 0);
     } else {
       lcd.setCursor(0, 0);
-      lcd.print("Monitoring...");
+      lcd.print("Monitoring:IP");
       lcd.setCursor(0, 1);
-      lcd.print("Sensors Active");
+      lcd.print(WiFi.localIP());
     }
   }
 }

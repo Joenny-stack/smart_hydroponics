@@ -49,11 +49,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () async {
-                widget.onIpChanged(_ipController.text);
-                // Save to database as last used IP
-                // ignore: use_build_context_synchronously
-                await ReadingsDB().saveLastUsedIp(_ipController.text);
-                Navigator.pop(context);
+                final newIp = _ipController.text;
+                widget.onIpChanged(newIp);
+                await ReadingsDB().saveLastUsedIp(newIp);
+                if (context.mounted) {
+                  Navigator.pop(context, newIp); // Return the new IP to the previous screen
+                }
               },
               child: const Text('Save'),
             ),

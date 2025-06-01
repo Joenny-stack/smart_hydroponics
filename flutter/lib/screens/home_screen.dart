@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../models/device_status.dart';
 import '../services/api_service.dart';
 import '../widgets/status_tile.dart';
@@ -14,23 +15,33 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  Stream<DeviceStatus> _statusStream = Stream.empty(); // 👈 Initialize with an empty stream
-  String espIp = '192.168.0.1'; // 👈 Initialize as empty string
+  Stream<DeviceStatus> _statusStream = Stream.empty();
+  String? espIp; // No default value
+  Timer? _readingTimer;
+  DeviceStatus? _lastRecordedStatus;
 
   @override
   void initState() {
     super.initState();
-    _loadLastUsedIp(); // Only load the last used IP, do not show dialog on start
+    _loadLastUsedIp();
   }
 
-    void _loadLastUsedIp() async {
+  @override
+  void dispose() {
+    _readingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _loadLastUsedIp() async {
     final lastIp = await ReadingsDB().getLastUsedIp();
-    if (lastIp != null && lastIp.isNotEmpty) {
-      setState(() {
-        espIp = lastIp;
-        _statusStream = ApiService.fetchStatusStream(espIp);
-      });
-    }
+    setState(() {
+      espIp = (lastIp != null && lastIp.isNotEmpty) ? lastIp : null;
+      if (espIp != null) {
+        _statusStream = ApiService.fetchStatusStream(espIp!);
+      } else {
+        _statusStream = Stream.empty();
+      }
+    });
   }
 
   void _showIpDialog() async {
@@ -64,9 +75,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (enteredIp != null && enteredIp.isNotEmpty) {
       setState(() {
         espIp = enteredIp;
-        _statusStream = ApiService.fetchStatusStream(espIp); // 👈 Update the stream
+        _statusStream = ApiService.fetchStatusStream(espIp!);
       });
-      await ReadingsDB().saveLastUsedIp(espIp);
+      await ReadingsDB().saveLastUsedIp(espIp!);
     }
   }
 
@@ -93,13 +104,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => SettingsScreen(
-                    currentIp: espIp,
+                    currentIp: espIp ?? '',
                     onIpChanged: (ip) {
                       setState(() {
                         espIp = ip;
-                        _statusStream = ApiService.fetchStatusStream(espIp);
+                        _statusStream = ApiService.fetchStatusStream(espIp!);
                       });
-                      Navigator.pop(context, ip);
                     },
                   ),
                 ),
@@ -107,7 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (newIp != null && newIp.isNotEmpty && newIp != espIp) {
                 setState(() {
                   espIp = newIp;
-                  _statusStream = ApiService.fetchStatusStream(espIp);
+                  _statusStream = ApiService.fetchStatusStream(espIp!);
                 });
               }
             },
@@ -117,10 +127,46 @@ class _HomeScreenState extends State<HomeScreen> {
       body: StreamBuilder<DeviceStatus>(
         stream: _statusStream,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (espIp == null || espIp!.isEmpty) {
+            // Show a 'No IP Provided' screen with a button to enter IP
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.info_outline, size: 64, color: Colors.blueGrey),
+                  const SizedBox(height: 16),
+                  const Text(
+                    "No IP address provided",
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Please enter the ESP32 IP address to start receiving data.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16, color: Colors.black54),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    onPressed: _showIpDialog,
+                    child: const Text("Enter IP Address"),
+                  ),
+                ],
+              ),
+            );
+          } else if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           } else if (snapshot.hasData) {
             final data = snapshot.data!;
+            // Start or reset the timer when new data arrives
+            if (_readingTimer == null || !_readingTimer!.isActive) {
+              _readingTimer?.cancel();
+              _readingTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+                if (_lastRecordedStatus != null) {
+                  ReadingsDB.insertReading(_lastRecordedStatus!);
+                }
+              });
+            }
+            _lastRecordedStatus = data;
             // Save reading to DB
             ReadingsDB.insertReading(data);
             return SingleChildScrollView(
@@ -256,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             );
           }
-          return const Center(child: Text("No data available")); // 👈 Handle no data case
+          return Container(); // Fallback in case of an unexpected state
         },
       ),
     );

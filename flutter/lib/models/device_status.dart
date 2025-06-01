@@ -31,14 +31,11 @@ class DeviceStatus {
     if (ph < 5.5 || ph > 7.5) {
       alerts.add("pH level is out of range (5.5-7.5).");
     }
-    if (soilMoisture < 20 || soilMoisture > 80) {
-      alerts.add("Soil moisture is out of range (20-80%).");
-    }
     if (waterLevel < 50) {
       alerts.add("Water level is too low (<50%).");
     }
-    if (tds < 500 || tds > 1500) {
-      alerts.add("TDS is out of range (500-1500 ppm).");
+    if (tds <= 300 || tds >= 1000) {
+      alerts.add("TDS is out of range (300-1000 ppm).");
     }
     return alerts;
   }
